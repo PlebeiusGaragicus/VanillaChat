@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Warn if .env file is missing, but continue
+if [ ! -f .env ]; then
+  echo "[Warning] .env file not found. Continuing without it."
+fi
+
+# Trap SIGINT (Ctrl-C) to bring down the container when exiting
+trap cleanup INT
+
+cleanup() {
+  docker compose -f docker-compose.yml down
+  exit 0
+}
+
+echo "Starting and building Docker containers..."
+COMPOSE_BAKE=true docker compose -f docker-compose.yml up --build -d
+
+# Display logs
+echo
+echo
+echo "--> Press Ctrl-C to stop and bring down containers <--"
+docker compose -f docker-compose.yml logs --follow
+
+# When Control-C is pressed, the trap command invokes `cleanup`

@@ -69,19 +69,18 @@
         const sendButton = document.getElementById('send-button');
         let messageCounter = 0; // To give each bot message a unique ID
 
-        sendButton.addEventListener('click', () => {
+        sendButton.addEventListener('click', async () => {
             const userMessage = userInput.value.trim();
             if (userMessage) {
                 // Display user message
                 chatBox.innerHTML += `<div class="message"><strong>You:</strong> ${userMessage}</div>`;
                 userInput.value = '';
 
-                // Simulate bot response
+                // Prepare bot message container
                 const botMessageId = `bot-msg-${messageCounter++}`;
-                const botResponse = `Hi! I’m a simple bot. You said: "${userMessage}"`;
                 chatBox.innerHTML += `
                     <div class="message bot-message">
-                        <strong>Bot:</strong> <span id="${botMessageId}">${botResponse}</span>
+                        <strong>Bot:</strong> <span id="${botMessageId}"></span>
                         <div class="actions">
                             <span onclick="copyText('${botMessageId}')" title="Copy bot message to clipboard">✂ Copy</span>
                             <span onclick="regenerateResponse('${botMessageId}')" title="Regenerate bot response">↻ Regenerate</span>
@@ -90,8 +89,30 @@
                         </div>
                     </div>
                 `;
-
                 chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+
+                // Stream the response from /stream
+                const botMessageElem = document.getElementById(botMessageId);
+                try {
+                    const response = await fetch('/stream');
+                    if (!response.body) {
+                        botMessageElem.textContent = '[Streaming not supported]';
+                        return;
+                    }
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let done = false;
+                    while (!done) {
+                        const { value, done: doneReading } = await reader.read();
+                        done = doneReading;
+                        if (value) {
+                            botMessageElem.textContent += decoder.decode(value);
+                            chatBox.scrollTop = chatBox.scrollHeight;
+                        }
+                    }
+                } catch (err) {
+                    botMessageElem.textContent = '[Error streaming response]';
+                }
             }
         });
 
