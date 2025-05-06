@@ -12,6 +12,11 @@
             margin: 20px;
             line-height: 1.5;
         }
+        
+        .container {
+            display: flex;
+            gap: 20px;
+        }
 
         a {
             color: #0000ff;
@@ -30,6 +35,8 @@
             padding: 10px;
             background-color: #f0f0f0;
         }
+        
+
 
         .message {
             margin-bottom: 15px;
@@ -82,7 +89,7 @@
                 const botMessageId = `bot-msg-${messageCounter++}`;
                 chatBox.innerHTML += `
                     <div class="message bot-message">
-                        <strong>Bot:</strong> <span id="${botMessageId}"></span>
+                        <strong id="bot-name-${botMessageId}">Bot:</strong> <span id="${botMessageId}"></span>
                         <div class="actions">
                             <span onclick="copyText('${botMessageId}')" title="Copy bot message to clipboard">✂ Copy</span>
                             <span onclick="regenerateResponse('${botMessageId}')" title="Regenerate bot response">↻ Regenerate</span>
@@ -109,22 +116,7 @@
                 let messageCount = 0;
                 let accumulatedContent = '';
                 
-                // Create a sidebar for showing execution trace
-                let sidebarElem = document.createElement('div');
-                sidebarElem.className = 'execution-trace';
-                sidebarElem.style.position = 'fixed';
-                sidebarElem.style.right = '10px';
-                sidebarElem.style.top = '10px';
-                sidebarElem.style.width = '250px';
-                sidebarElem.style.maxHeight = '80vh';
-                sidebarElem.style.overflowY = 'auto';
-                sidebarElem.style.backgroundColor = '#f0f0f0';
-                sidebarElem.style.padding = '10px';
-                sidebarElem.style.borderRadius = '5px';
-                sidebarElem.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-                sidebarElem.style.zIndex = '1000';
-                sidebarElem.innerHTML = '<h3>Execution Trace</h3>';
-                document.body.appendChild(sidebarElem);
+                // Track the current active node for displaying in the chat
                 
                 // Track active nodes
                 const activeNodes = {};
@@ -153,17 +145,14 @@
                         
                         // Log the parsed message
                         console.log(`[${messageCount}] Parsed message:`, message);
-                        
-                        // Handle different message types
                         switch (message.type) {
                             case 'start':
                                 console.log('Graph execution started');
-                                sidebarElem.innerHTML = '<h3>Execution Trace</h3><div>Started processing...</div>';
                                 break;
                                 
                             case 'token':
                                 // Get the token content
-                                const content = message.content;
+                                const content = message.content || message.token || '';
                                 
                                 // Log the token
                                 console.log(`[${messageCount}] Token from ${message.node}:`, content);
@@ -176,66 +165,110 @@
                                 chatBox.scrollTop = chatBox.scrollHeight;
                                 break;
                                 
+                            case 'output':
+                            case 'node_output':
+                                // Handle output from nodes that return a block of text all at once
+                                if (message.output) {
+                                    const nodeName = message.node;
+                                    console.log(`Output from ${nodeName}:`, message.output);
+                                    
+                                    // Get the output for this node
+                                    let output;
+                                    if (typeof message.output === 'object') {
+                                        // Try to get output for this specific node
+                                        if (message.output[nodeName]) {
+                                            output = message.output[nodeName];
+                                        } else {
+                                            // If no node-specific output, use the entire output object
+                                            output = message.output;
+                                        }
+                                    } else {
+                                        // If output is not an object, use it directly
+                                        output = message.output;
+                                    }
+                                    
+                                    // Process the output
+                                    if (output !== undefined) {
+                                        // If output is an object with messages, extract the content
+                                        if (typeof output === 'object' && output.messages && output.messages.length > 0) {
+                                            const lastMessage = output.messages[output.messages.length - 1];
+                                            if (lastMessage && lastMessage.content) {
+                                                output = lastMessage.content;
+                                            } else {
+                                                output = JSON.stringify(output);
+                                            }
+                                        } else if (typeof output === 'object') {
+                                            output = JSON.stringify(output);
+                                        }
+                                        
+                                        // Update the bot name to show the current node
+                                        const botNameElem = document.getElementById(`bot-name-${botMessageId}`);
+                                        if (botNameElem) {
+                                            botNameElem.textContent = `${nodeName}:`;
+                                        }
+                                        
+                                        // Update the message content
+                                        accumulatedContent = output;
+                                        botMessageElem.textContent = accumulatedContent;
+                                        
+                                        // Force scroll to bottom to ensure content is visible
+                                        setTimeout(() => {
+                                            chatBox.scrollTop = chatBox.scrollHeight;
+                                        }, 50);
+                                    }
+                                }
+                                break;    
                             case 'node_start':
-                                // Track the node start time
                                 const nodeName = message.node;
                                 console.log(`Node started: ${nodeName}`);
                                 
-                                // Create or update node element in sidebar
-                                const nodeId = `node-${nodeName.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                                let nodeElem = document.getElementById(nodeId);
-                                
-                                if (!nodeElem) {
-                                    nodeElem = document.createElement('div');
-                                    nodeElem.id = nodeId;
-                                    nodeElem.style.margin = '5px 0';
-                                    nodeElem.style.padding = '5px';
-                                    nodeElem.style.borderRadius = '3px';
-                                    sidebarElem.appendChild(nodeElem);
+                                // Skip nodes that start with underscore
+                                if (!nodeName.startsWith('_')) {
+                                    // Update the bot name to show the current node
+                                    const botNameElem = document.getElementById(`bot-name-${botMessageId}`);
+                                    if (botNameElem) {
+                                        botNameElem.textContent = `${nodeName}:`;
+                                    }
+                                    activeNodes[nodeName] = true;
                                 }
-                                
-                                // Mark as running
-                                nodeElem.style.backgroundColor = '#fffacd'; // Light yellow
-                                nodeElem.innerHTML = `<strong>${nodeName}</strong>: Running...`;
-                                activeNodes[nodeName] = true;
                                 break;
                                 
                             case 'node_end':
                                 const completedNode = message.node;
                                 console.log(`Node completed: ${completedNode}`);
                                 
-                                // Update node element in sidebar
-                                const completedNodeId = `node-${completedNode.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                                let completedNodeElem = document.getElementById(completedNodeId);
-                                
-                                if (completedNodeElem) {
-                                    // Mark as complete
-                                    completedNodeElem.style.backgroundColor = '#e6ffe6'; // Light green
-                                    
-                                    let outputText = '';
-                                    if (message.output) {
-                                        outputText = `<div class="output"><small>${JSON.stringify(message.output)}</small></div>`;
+                                // Special handling for LangGraph node which contains the final output
+                                if (completedNode === 'LangGraph' && message.output && message.output.handle_command) {
+                                    const handleCommandOutput = message.output.handle_command;
+                                    if (handleCommandOutput.messages && handleCommandOutput.messages.length > 0) {
+                                        const lastMessage = handleCommandOutput.messages[handleCommandOutput.messages.length - 1];
+                                        if (lastMessage && lastMessage.content) {
+                                            // Update the bot name to show "handle_command"
+                                            const botNameElem = document.getElementById(`bot-name-${botMessageId}`);
+                                            if (botNameElem) {
+                                                botNameElem.textContent = 'handle_command:';
+                                            }
+                                            
+                                            // Update the message content
+                                            accumulatedContent = lastMessage.content;
+                                            botMessageElem.textContent = accumulatedContent;
+                                        }
                                     }
-                                    
-                                    completedNodeElem.innerHTML = `<strong>${completedNode}</strong>: Complete ${outputText}`;
+                                }
+                                
+                                if (activeNodes[completedNode]) {
                                     delete activeNodes[completedNode];
                                 }
                                 break;
                                 
                             case 'complete':
+                            case 'end':
                                 console.log('Stream complete');
+                                
                                 // Remove the cursor at the end
                                 botMessageElem.textContent = accumulatedContent;
                                 
-                                // Mark all remaining nodes as complete
-                                for (const node in activeNodes) {
-                                    const nodeId = `node-${node.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                                    const nodeElem = document.getElementById(nodeId);
-                                    if (nodeElem) {
-                                        nodeElem.style.backgroundColor = '#e6ffe6';
-                                        nodeElem.innerHTML = `<strong>${node}</strong>: Complete`;
-                                    }
-                                }
+                                // Keep the last active node name (don't reset to "Bot:")
                                 
                                 socket.close();
                                 break;
