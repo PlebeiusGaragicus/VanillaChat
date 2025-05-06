@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Retro Chatbot</title>
+    <!-- Add marked.js for markdown formatting -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         body {
             background-color: #ffffff;
@@ -41,9 +43,81 @@
         .message {
             margin-bottom: 15px;
         }
+        
+        /* Markdown styling */
+        .markdown-content {
+            line-height: 1.5;
+        }
+        
+        .markdown-content p {
+            margin-bottom: 10px;
+        }
+        
+        .markdown-content h1, .markdown-content h2, .markdown-content h3, 
+        .markdown-content h4, .markdown-content h5, .markdown-content h6 {
+            margin-top: 15px;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        
+        .markdown-content code {
+            background-color: #e0e0e0;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        
+        .markdown-content pre {
+            background-color: #e0e0e0;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            margin-bottom: 10px;
+        }
+        
+        .markdown-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        
+        .markdown-content ul, .markdown-content ol {
+            margin-left: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .markdown-content blockquote {
+            border-left: 3px solid #ccc;
+            padding-left: 10px;
+            margin-left: 10px;
+            color: #555;
+        }
 
         .bot-message {
             margin-left: 20px;
+        }
+        
+        .input-container {
+            display: flex;
+            margin-top: 10px;
+            width: 100%;
+        }
+        
+        #user-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid black;
+            margin-right: 5px;
+        }
+        
+        #send-button {
+            padding: 8px 15px;
+            background-color: #f0f0f0;
+            border: 1px solid black;
+            cursor: pointer;
+        }
+        
+        #send-button:hover {
+            background-color: #d0d0d0;
         }
 
         .actions {
@@ -67,8 +141,10 @@
     <h1>Retro Chatbot</h1>
     <p>[ agent info goes here ]</p>
     <div id="chat-box"></div>
-    <input type="text" id="user-input" placeholder="Type your message..." style="width: 300px; margin-top: 10px;">
-    <button id="send-button">Send</button>
+    <div class="input-container">
+        <input type="text" id="user-input" placeholder="Type your message...">
+        <button id="send-button">Send</button>
+    </div>
 
     <script>
         // Generate a persistent session ID for this chat
@@ -78,7 +154,8 @@
         const sendButton = document.getElementById('send-button');
         let messageCounter = 0; // To give each bot message a unique ID
 
-        sendButton.addEventListener('click', () => {
+        // Function to send message
+        function sendMessage() {
             const userMessage = userInput.value.trim();
             if (userMessage) {
                 // Display user message
@@ -89,7 +166,7 @@
                 const botMessageId = `bot-msg-${messageCounter++}`;
                 chatBox.innerHTML += `
                     <div class="message bot-message">
-                        <strong id="bot-name-${botMessageId}">Bot:</strong> <span id="${botMessageId}"></span>
+                        <strong id="bot-name-${botMessageId}">Bot:</strong> <div id="${botMessageId}" class="markdown-content"></div>
                         <div class="actions">
                             <span onclick="copyText('${botMessageId}')" title="Copy bot message to clipboard">✂ Copy</span>
                             <span onclick="regenerateResponse('${botMessageId}')" title="Regenerate bot response">↻ Regenerate</span>
@@ -160,8 +237,8 @@
                                 // Add to accumulated content
                                 accumulatedContent += content;
                                 
-                                // Update the UI with the accumulated content
-                                botMessageElem.textContent = accumulatedContent + '▌';
+                                // Update the UI with the accumulated content as markdown
+                                botMessageElem.innerHTML = marked.parse(accumulatedContent) + '<span class="cursor">▌</span>';
                                 chatBox.scrollTop = chatBox.scrollHeight;
                                 break;
                                 
@@ -249,9 +326,9 @@
                                                 botNameElem.textContent = 'handle_command:';
                                             }
                                             
-                                            // Update the message content
+                                            // Update the message content as markdown
                                             accumulatedContent = lastMessage.content;
-                                            botMessageElem.textContent = accumulatedContent;
+                                            botMessageElem.innerHTML = marked.parse(accumulatedContent);
                                         }
                                     }
                                 }
@@ -265,8 +342,8 @@
                             case 'end':
                                 console.log('Stream complete');
                                 
-                                // Remove the cursor at the end
-                                botMessageElem.textContent = accumulatedContent;
+                                // Remove the cursor at the end and format as markdown
+                                botMessageElem.innerHTML = marked.parse(accumulatedContent);
                                 
                                 // Keep the last active node name (don't reset to "Bot:")
                                 
@@ -307,6 +384,16 @@
                     }
                 }, 30000); // 30 second timeout
             }
+        };
+        
+        // Add click event listener to send button
+        sendButton.addEventListener('click', sendMessage);
+        
+        // Add keypress event listener to input box for Enter key
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
         });
 
         // Function to copy bot message text to clipboard
@@ -337,7 +424,7 @@
             const botMessageElement = document.getElementById(messageId);
             const newText = prompt('Edit bot response:', botMessageElement.textContent);
             if (newText !== null) {
-                botMessageElement.textContent = newText;
+                botMessageElement.innerHTML = marked.parse(newText);
             }
         }
     </script>
