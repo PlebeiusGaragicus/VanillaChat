@@ -57,19 +57,21 @@
     </style>
 </head>
 <body>
-    <h1>Welcome to Retro Chatbot</h1>
-    <p>Talk to the bot below!</p>
+    <h1>Retro Chatbot</h1>
+    <p>[ agent info goes here ]</p>
     <div id="chat-box"></div>
     <input type="text" id="user-input" placeholder="Type your message..." style="width: 300px; margin-top: 10px;">
     <button id="send-button">Send</button>
 
     <script>
+        // Generate a persistent session ID for this chat
+        const sessionId = crypto.randomUUID();
         const chatBox = document.getElementById('chat-box');
         const userInput = document.getElementById('user-input');
         const sendButton = document.getElementById('send-button');
         let messageCounter = 0; // To give each bot message a unique ID
 
-        sendButton.addEventListener('click', async () => {
+        sendButton.addEventListener('click', () => {
             const userMessage = userInput.value.trim();
             if (userMessage) {
                 // Display user message
@@ -91,28 +93,44 @@
                 `;
                 chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
 
-                // Stream the response from /stream
-                const botMessageElem = document.getElementById(botMessageId);
-                try {
-                    const response = await fetch('/stream');
-                    if (!response.body) {
-                        botMessageElem.textContent = '[Streaming not supported]';
-                        return;
-                    }
+                // Stream the response via fetch POST with JSON
+                (async () => {
+                    const botMessageElem = document.getElementById(botMessageId);
+                    const response = await fetch('/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: userMessage, thread_id: sessionId })
+                    });
                     const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let done = false;
-                    while (!done) {
-                        const { value, done: doneReading } = await reader.read();
-                        done = doneReading;
-                        if (value) {
-                            botMessageElem.textContent += decoder.decode(value);
-                            chatBox.scrollTop = chatBox.scrollHeight;
+                    const decoder = new TextDecoder('utf-8');
+                    let buffer = '';
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const parts = buffer.split('\n\n');
+                        for (let i = 0; i < parts.length - 1; i++) {
+                            const part = parts[i];
+                            if (part.startsWith('data: ')) {
+                                const jsonStr = part.slice(6);
+                                try {
+                                    const data = JSON.parse(jsonStr);
+                                    if (data.messages && Array.isArray(data.messages)) {
+                                        for (const msg of data.messages) {
+                                            if (msg.role === 'assistant' && msg.content) {
+                                                botMessageElem.textContent += msg.content;
+                                                chatBox.scrollTop = chatBox.scrollHeight;
+                                            }
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('Parse error:', e);
+                                }
+                            }
                         }
+                        buffer = parts[parts.length - 1];
                     }
-                } catch (err) {
-                    botMessageElem.textContent = '[Error streaming response]';
-                }
+                })();
             }
         });
 
