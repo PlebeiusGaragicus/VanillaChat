@@ -63,19 +63,30 @@ def handle_command(state: State, config: RunnableConfig):
 def ollama(state: State, config: RunnableConfig):
     llm = get_llm(config)
     configurable = Config.from_runnable_config(config)
-
-    # Add user message to state history
+    
+    # If we have a new user query, add it to the messages
     if state.query:
+        # Add the user's query to the message history
         user_message = {"role": "user", "content": state.query}
+        # Ensure we're not duplicating the message if it's already in the state
         if not state.messages or state.messages[-1] != user_message:
             state.messages.append(user_message)
-
-    # Prepend system prompt if not present
+    
+    # Add system prompt to messages if it's not already there
+    # Check if the first message is a system message
     if not state.messages or state.messages[0].get("role") != "system":
+        # Prepend system prompt to messages
         state.messages = [{"role": "system", "content": configurable.system_prompt}] + state.messages
-
-    # Stream each chunk from the LLM
-    for chunk in llm.stream(state.messages):
-        assistant_message = {"role": "assistant", "content": chunk.content}
-        state.messages.append(assistant_message)
-        yield {"messages": [assistant_message]}
+    
+    # Call the LLM with the full conversation history
+    response = llm.stream(state.messages)
+    
+    # Join all chunks into a single response
+    full_response = "".join(chunk.content for chunk in response)
+            
+    # Add the assistant's response to the message history
+    assistant_message = {"role": "assistant", "content": full_response}
+    state.messages.append(assistant_message)
+    
+    # Return the updated messages list with the new response
+    return {"messages": [assistant_message]}

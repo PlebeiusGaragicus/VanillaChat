@@ -93,44 +93,186 @@
                 `;
                 chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
 
-                // Stream the response via fetch POST with JSON
-                (async () => {
-                    const botMessageElem = document.getElementById(botMessageId);
-                    const response = await fetch('/stream', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query: userMessage, thread_id: sessionId })
-                    });
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder('utf-8');
-                    let buffer = '';
-                    while (true) {
-                        const { value, done } = await reader.read();
-                        if (done) break;
-                        buffer += decoder.decode(value, { stream: true });
-                        const parts = buffer.split('\n\n');
-                        for (let i = 0; i < parts.length - 1; i++) {
-                            const part = parts[i];
-                            if (part.startsWith('data: ')) {
-                                const jsonStr = part.slice(6);
-                                try {
-                                    const data = JSON.parse(jsonStr);
-                                    if (data.messages && Array.isArray(data.messages)) {
-                                        for (const msg of data.messages) {
-                                            if (msg.role === 'assistant' && msg.content) {
-                                                botMessageElem.textContent += msg.content;
-                                                chatBox.scrollTop = chatBox.scrollHeight;
-                                            }
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.error('Parse error:', e);
+                // Use the simplest possible approach with WebSocket
+                const botMessageElem = document.getElementById(botMessageId);
+                botMessageElem.textContent = ''; // Clear any previous content
+                
+                // Add a visible indicator that we're waiting for a response
+                botMessageElem.textContent = 'Thinking...';
+                
+                // Create a WebSocket connection
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+                const socket = new WebSocket(wsUrl);
+                
+                // For token streaming, we need to track what we've received
+                let messageCount = 0;
+                let accumulatedContent = '';
+                
+                // Create a sidebar for showing execution trace
+                let sidebarElem = document.createElement('div');
+                sidebarElem.className = 'execution-trace';
+                sidebarElem.style.position = 'fixed';
+                sidebarElem.style.right = '10px';
+                sidebarElem.style.top = '10px';
+                sidebarElem.style.width = '250px';
+                sidebarElem.style.maxHeight = '80vh';
+                sidebarElem.style.overflowY = 'auto';
+                sidebarElem.style.backgroundColor = '#f0f0f0';
+                sidebarElem.style.padding = '10px';
+                sidebarElem.style.borderRadius = '5px';
+                sidebarElem.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+                sidebarElem.style.zIndex = '1000';
+                sidebarElem.innerHTML = '<h3>Execution Trace</h3>';
+                document.body.appendChild(sidebarElem);
+                
+                // Track active nodes
+                const activeNodes = {};
+                
+                // Handle WebSocket open event
+                socket.onopen = function() {
+                    console.log('WebSocket connection established');
+                    
+                    // Send the initial message with query and session ID
+                    socket.send(JSON.stringify({
+                        query: userMessage,
+                        thread_id: sessionId
+                    }));
+                };
+                
+                // Handle incoming messages
+                socket.onmessage = function(event) {
+                    messageCount++;
+                    
+                    // Log every raw message for debugging
+                    console.log(`[${messageCount}] WebSocket message:`, event.data);
+                    
+                    try {
+                        // Parse the message data
+                        const message = JSON.parse(event.data);
+                        
+                        // Log the parsed message
+                        console.log(`[${messageCount}] Parsed message:`, message);
+                        
+                        // Handle different message types
+                        switch (message.type) {
+                            case 'start':
+                                console.log('Graph execution started');
+                                sidebarElem.innerHTML = '<h3>Execution Trace</h3><div>Started processing...</div>';
+                                break;
+                                
+                            case 'token':
+                                // Get the token content
+                                const content = message.content;
+                                
+                                // Log the token
+                                console.log(`[${messageCount}] Token from ${message.node}:`, content);
+                                
+                                // Add to accumulated content
+                                accumulatedContent += content;
+                                
+                                // Update the UI with the accumulated content
+                                botMessageElem.textContent = accumulatedContent + '▌';
+                                chatBox.scrollTop = chatBox.scrollHeight;
+                                break;
+                                
+                            case 'node_start':
+                                // Track the node start time
+                                const nodeName = message.node;
+                                console.log(`Node started: ${nodeName}`);
+                                
+                                // Create or update node element in sidebar
+                                const nodeId = `node-${nodeName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                                let nodeElem = document.getElementById(nodeId);
+                                
+                                if (!nodeElem) {
+                                    nodeElem = document.createElement('div');
+                                    nodeElem.id = nodeId;
+                                    nodeElem.style.margin = '5px 0';
+                                    nodeElem.style.padding = '5px';
+                                    nodeElem.style.borderRadius = '3px';
+                                    sidebarElem.appendChild(nodeElem);
                                 }
-                            }
+                                
+                                // Mark as running
+                                nodeElem.style.backgroundColor = '#fffacd'; // Light yellow
+                                nodeElem.innerHTML = `<strong>${nodeName}</strong>: Running...`;
+                                activeNodes[nodeName] = true;
+                                break;
+                                
+                            case 'node_end':
+                                const completedNode = message.node;
+                                console.log(`Node completed: ${completedNode}`);
+                                
+                                // Update node element in sidebar
+                                const completedNodeId = `node-${completedNode.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                                let completedNodeElem = document.getElementById(completedNodeId);
+                                
+                                if (completedNodeElem) {
+                                    // Mark as complete
+                                    completedNodeElem.style.backgroundColor = '#e6ffe6'; // Light green
+                                    
+                                    let outputText = '';
+                                    if (message.output) {
+                                        outputText = `<div class="output"><small>${JSON.stringify(message.output)}</small></div>`;
+                                    }
+                                    
+                                    completedNodeElem.innerHTML = `<strong>${completedNode}</strong>: Complete ${outputText}`;
+                                    delete activeNodes[completedNode];
+                                }
+                                break;
+                                
+                            case 'complete':
+                                console.log('Stream complete');
+                                // Remove the cursor at the end
+                                botMessageElem.textContent = accumulatedContent;
+                                
+                                // Mark all remaining nodes as complete
+                                for (const node in activeNodes) {
+                                    const nodeId = `node-${node.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                                    const nodeElem = document.getElementById(nodeId);
+                                    if (nodeElem) {
+                                        nodeElem.style.backgroundColor = '#e6ffe6';
+                                        nodeElem.innerHTML = `<strong>${node}</strong>: Complete`;
+                                    }
+                                }
+                                
+                                socket.close();
+                                break;
+                                
+                            case 'error':
+                                console.error('Error from server:', message.message);
+                                botMessageElem.textContent = accumulatedContent + '\n\n[Error: ' + message.message + ']';
+                                socket.close();
+                                break;
+                                
+                            default:
+                                console.log(`Unknown message type: ${message.type}`);
                         }
-                        buffer = parts[parts.length - 1];
+                    } catch (e) {
+                        console.error(`[${messageCount}] Error parsing message:`, e);
                     }
-                })();
+                };
+                
+                // Handle WebSocket errors
+                socket.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    botMessageElem.textContent += '\n\n[Connection error. Please try again.]';
+                    socket.close();
+                };
+                
+                // Handle WebSocket close
+                socket.onclose = function() {
+                    console.log('WebSocket connection closed');
+                };
+                
+                // Automatically close the connection after a timeout
+                setTimeout(() => {
+                    if (socket.readyState !== 3) { // 3 = CLOSED
+                        console.log('Closing WebSocket after timeout');
+                        socket.close();
+                    }
+                }, 30000); // 30 second timeout
             }
         });
 
